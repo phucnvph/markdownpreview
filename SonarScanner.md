@@ -6,36 +6,136 @@ Mục tiêu cốt lõi: **Đảm bảo 100% mã nguồn đáp ứng tiêu chuẩ
 
 ---
 
-## 🏛️ I. Chiến Lược 4 Tầng Kiểm Soát Chất Lượng (4-Tier Quality Gate)
+## 🏛️ I. Tổng Quan Chiến Lược 4 Tầng Kiểm Soát Chất Lượng (4-Tier Quality Gate)
 
-Thay vì chạy phân tích nặng trực tiếp ở Git `pre-commit` (khiến mỗi lần commit mất 1–2 phút và phụ thuộc mạng), hệ thống áp dụng chiến lược phân tầng chuẩn Enterprise:
+Hệ thống phân tầng kiểm soát chất lượng theo 4 chốt chặn nối tiếp nhau trong vòng đời phát triển:
 
 ```mermaid
 flowchart LR
     classDef step fill:#f8fafc,stroke:#3b82f6,stroke-width:2px,color:#0f172a;
     classDef gate fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#0f172a;
 
-    S1["BƯỚC 1: IDE\n───────────────\n• SonarLint Plugin\n• Báo lỗi khi gõ code\n• Phản hồi tức thì"]:::step
-    -->|git add| S2["BƯỚC 2: PRE-COMMIT\n───────────────────\n• Husky + Lint-staged\n• Quét file staged\n• < 2s, 100% Offline"]:::step
-    -->|git push| S3["BƯỚC 3: PRE-PUSH\n───────────────────\n• make sonar (Docker)\n• Quét toàn bộ repo\n• Độc lập trên mọi OS"]:::step
-    -->|Mở Pull Request| S4["BƯỚC 4: CI/CD GATE\n───────────────────\n• GitLab CI / Actions\n• Quality Gate tự động\n• Chặn Merge nếu lỗi"]:::gate
+    S1["TẦNG 1: LOCAL IDE\n───────────────\n• SonarLint + Prettier\n• Báo lỗi & format tức thì\n• 100% thời gian thực"]:::step
+    -->|git add & commit| S2["TẦNG 2: LOCAL COMMIT\n───────────────────\n• Pre-commit Linter\n• Quét file staged\n• < 1s, 100% Offline"]:::step
+    -->|git push| S3["TẦNG 3: LOCAL PRE-PUSH\n───────────────────\n• SonarScanner (Docker)\n• make test-cov & sonar\n• Quét toàn diện repo"]:::gate
+    -->|Tạo Merge Request| S4["TẦNG 4: CI/CD PIPELINE\n───────────────────\n• GitLab CI / Actions\n• Quality Gate bắt buộc\n• Khóa nút Merge nếu lỗi"]:::gate
 ```
 
-1. **Tầng 1 (Local IDE)**: Cài đặt **SonarLint** trên VSCode / WebStorm để phát hiện lỗi ngay trong lúc viết code.
-2. **Tầng 2: Local Pre-commit (Husky + Lint-staged < 2s, 100% Offline)**: Chạy linter siêu tốc (`make lint`, `make format`) kiểm tra cú pháp và định dạng trên các file staged. Không gọi qua mạng, không làm chậm commit.
-3. **Tầng 3 (Local On-Demand)**: Lập trình viên chạy `make sonar` để quét toàn bộ trước khi push code hoặc mở Pull Request. Chạy qua **Docker**, không cần cài Java, không cần `sudo`, hoạt động đồng nhất trên macOS, Linux và Windows.
-4. **Tầng 4 (CI/CD Pipeline)**: Quality Gate tự động trên GitLab CI / GitHub Actions khi tạo Pull Request vào nhánh `develop` hoặc `master`.
+### Bảng đối chiếu 4 tầng kiểm soát:
+
+| Tầng | Tên chốt chặn | Công cụ áp dụng | Thời điểm kích hoạt | Tốc độ | Tính bắt buộc |
+| :---: | :--- | :--- | :--- | :--- | :--- |
+| **1** | **Local IDE** | SonarLint + Prettier | Khi đang gõ code & bấm Lưu (`Ctrl + S`) | Tức thì (0s) | Khuyến nghị cho cả team |
+| **2** | **Local Commit** | Git Pre-commit (Husky / Linter) | Khi gõ lệnh `git commit` | Siêu tốc (< 1s) | Bắt buộc tại máy |
+| **3** | **Local Pre-Push** | SonarScanner (Docker / Makefile) | Trước khi gõ `git push` | ~30s | Tùy chọn (On-Demand) |
+| **4** | **CI/CD Pipeline** | GitLab CI / GitHub Actions | Khi tạo Merge Request / Push vào nhánh chính | 1–2 phút | **Bắt buộc tuyệt đối (Chốt chặn cuối)** |
 
 ---
 
-## ⚙️ II. Cấu Hình Chuẩn Hóa (Configuration as Code)
+## 💻 II. TẦNG 1: Local IDE (SonarLint & Prettier Auto-Format)
 
-Toàn bộ thông số phân tích được khai báo tập trung tại [sonar-project.properties](file:///home/ubuntu/learn/multi-tenant/be-nestjs-multi-tenant/sonar-project.properties) nằm ở thư mục gốc của repo:
+> **Mục tiêu**: Bắt lỗi và định dạng chuẩn ngay khi ngón tay bạn chạm vào bàn phím, loại bỏ 90% lỗi cơ bản trước khi đưa code vào Git.
+
+### 1. Cài đặt Extensions trên VSCode:
+Vào mục Extensions (`Ctrl + Shift + X`) tìm và cài đặt 2 extension:
+* **Prettier - Code formatter** (`esbenp.prettier-vscode`): Tự động format code theo chuẩn chung.
+* **SonarLint** (`SonarSource.sonarlint-vscode`): Bắt lỗi code smell, bảo mật tức thì.
+
+*(Dự án đã có sẵn file [.vscode/extensions.json](file:///be-nestjs-multi-tenant/.vscode/extensions.json), khi mở VSCode sẽ tự động gợi ý cài đặt)*.
+
+### 2. Cấu hình thiết lập tại [.vscode/settings.json](file:///be-nestjs-multi-tenant/.vscode/settings.json):
+
+```json
+{
+  "typescript.preferences.importModuleSpecifier": "non-relative",
+  "javascript.preferences.importModuleSpecifier": "non-relative",
+  "typescript.preferences.importModuleSpecifierEnding": "minimal",
+  "javascript.preferences.importModuleSpecifierEnding": "minimal",
+  "typescript.suggest.paths": true,
+  "javascript.suggest.paths": true,
+
+  // 1. Tự động Format code với Prettier khi lưu (Ctrl + S) - Giống 100% make format
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+
+  // 2. Đồng bộ bộ luật (Quality Profile) từ SonarQube Server về IDE (Connected Mode)
+  "sonarlint.connectedMode.connections.sonarqube": [
+    {
+      "connectionId": "internal-sonar",
+      "serverUrl": "http://57.xxx.xx.xx",
+      "token": "sqa_c741xxxxxxxxxxxxxxxxxxxx"
+    }
+  ],
+  "sonarlint.connectedMode.project": {
+    "connectionId": "internal-sonar",
+    "projectKey": "NestJS-HeadlessCMS-Rule"
+  }
+}
+```
+
+> [!TIP]
+> - **Lợi ích Prettier**: Bấm `Ctrl + S` là code tự chuẩn hóa thụt dòng, dấu ngoặc, dấu nháy theo đúng file [`.prettierrc`](file:///be-nestjs-multi-tenant/.prettierrc).
+> - **Lợi ích SonarLint Connected Mode**: Tải toàn bộ ruleset của dự án từ `http://57.xxx.xx.xx` về máy, gõ đến đâu gạch đỏ cảnh báo đến đấy, loại bỏ hoàn toàn tình trạng "ở máy tôi chạy được mà lên server bị báo lỗi".
+
+---
+
+## ⚡ III. TẦNG 2: Local Commit (Pre-Commit Gate)
+
+> **Mục tiêu**: Chặn các lỗi cú pháp, linting trên các file vừa sửa mà không làm chậm nhịp gõ commit hàng ngày (< 1 giây, hoàn toàn offline).
+
+### 1. Hành vi trong luồng Git hàng ngày:
+
+```bash
+# 1. Đưa file vào staging area (diễn ra tức thì 0.01s, không quét)
+git add src/modules/auth/auth.service.ts
+
+# 2. Tạo commit (chỉ mất ~0.5s - 1s kiểm tra cú pháp nội bộ)
+git commit -m "feat(auth): add multi-tenant token verification"
+```
+
+* **`git add <file>`**: Chỉ đưa file vào Staging Area, tuyệt đối KHÔNG chạy phân tích nặng, không làm chậm thao tác.
+* **`git commit`**: Kích hoạt kiểm tra cục bộ offline (như `oxlint`, `prettier`) trên chính các file staged.
+
+### 2. Cách bỏ qua kiểm tra khi cần commit gấp (Bypass với `--no-verify`):
+
+Khi cần commit lưu tạm code đang làm dở (WIP - Work in Progress) trước khi đổi máy hoặc chuyển nhánh:
+```bash
+# Cách 1: Dùng cờ đầy đủ
+git commit -m "WIP: lưu tạm code đang làm dở" --no-verify
+
+# Cách 2: Dùng cờ viết tắt (-n)
+git commit -n -m "WIP: lưu tạm code đang làm dở"
+```
+
+> [!NOTE]
+> Cờ `--no-verify` (hoặc `-n`) chỉ có tác dụng vượt qua chốt chặn ở máy cá nhân của bạn. Khi bạn đẩy code lên và mở **Merge Request**, hệ thống **CI/CD Quality Gate trên Server (Tầng 4)** vẫn sẽ tự động quét để đảm bảo nhánh chính không bị lỗi.
+
+---
+
+## 🚀 IV. TẦNG 3: Local Pre-Push (SonarScanner & Quality Gate On-Demand)
+
+> **Mục tiêu**: Chạy phân tích toàn diện mã nguồn cùng báo cáo độ bao phủ kiểm thử (Test Coverage) trước khi đẩy code rời khỏi máy cá nhân.
+
+### 1. Cấu hình tập trung tại [sonar-project.properties](file:///be-nestjs-multi-tenant/sonar-project.properties):
+
+Toàn bộ thông số phân tích của dự án được khai báo tập trung tại file cấu hình ở thư mục gốc:
 
 ```properties
 # Server & Định danh dự án
-sonar.host.url=http://57.180.31.107:9000
-sonar.projectKey=be-nestjs-multi-tenant
+sonar.host.url=http://57.xxx.xx.xx
+sonar.projectKey=NestJS-HeadlessCMS-Rule
 sonar.projectName=Enterprise NestJS Multi-Tenant Backend
 sonar.projectVersion=1.0.0
 
@@ -54,234 +154,165 @@ sonar.javascript.lcov.reportPaths=coverage/lcov.info
 sonar.sourceEncoding=UTF-8
 ```
 
----
+### 2. Thực thi kiểm tra thủ công (On-Demand) qua Docker / Makefile:
 
-## 🚀 III. Hướng Dẫn Sử Dụng Hàng Ngày Cho Lập Trình Viên
+Dự án đã đóng gói sẵn lệnh quét SonarQube qua **Docker** trong [Makefile](file:///be-nestjs-multi-tenant/Makefile). Lập trình viên không cần cài đặt Java hay cấu hình CLI phức tạp lên máy cá nhân.
 
-### 1. Hành vi tại từng bước trong vòng đời Git (Git Lifecycle)
+#### Đoạn cấu hình trong [Makefile](file:///be-nestjs-multi-tenant/Makefile):
 
-| Lệnh Git             | Điều gì diễn ra?                                                                                                                                                      | Tốc độ              | Phụ thuộc mạng?          |
-| :------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------ | :----------------------- |
-| **`git add <file>`** | **Chỉ đưa file vào Staging Area**. Tuyệt đối KHÔNG chạy SonarScanner, KHÔNG chặn hay làm chậm thao tác. Các file này trở thành đầu vào để linter kiểm tra ở bước sau. | **Tức thì (0.01s)** | **Không (100% Offline)** |
-| **`git commit`**     | Kích hoạt kiểm tra Linting & Formatting cục bộ (`make lint`) trên chính các file vừa `git add`.                                                                       | **Siêu tốc (< 2s)** | **Không (100% Offline)** |
-| **`git push`**       | Đẩy code đã kiểm tra lên remote branch.                                                                                                                               | Bình thường         | Có                       |
-| **Tạo Pull Request** | **CI/CD tự động kích hoạt SonarQube Quality Gate** trên server để phân tích toàn diện.                                                                                | Tự động trên CI     | Có                       |
+```makefile
+# ------------------------------------------------------------------------------
+# SonarQube Static Code Analysis (Docker-based)
+# ------------------------------------------------------------------------------
+SONAR_HOST_URL ?= http://57.xxx.xx.xx
+SONAR_TOKEN    ?=
 
-#### Thao tác commit thông thường:
-
-```bash
-# 1. Đưa file vào staging area (diễn ra tức thì, không bị quét)
-git add src/modules/auth/auth.service.ts
-
-# 2. Tạo commit (chỉ mất ~1-2s kiểm tra lint nội bộ)
-git commit -m "feat(auth): add multi-tenant token verification"
+sonar: ## Run SonarQube analysis via Docker (usage: make sonar SONAR_TOKEN=xxx)
+	@echo "$(CYAN)Running SonarScanner analysis via Docker...$(RESET)"
+	docker run --rm \
+		--network=host \
+		-e SONAR_HOST_URL="$(SONAR_HOST_URL)" \
+		-e SONAR_TOKEN="$(SONAR_TOKEN)" \
+		-v "$$(pwd):/usr/src" \
+		sonarsource/sonar-scanner-cli
 ```
 
-#### Cách bỏ qua kiểm tra khi cần commit gấp (Bypass với `--no-verify`):
+#### Giải thích cơ chế hoạt động của lệnh Docker:
+* `docker run --rm`: Khởi chạy container tạm thời và tự động xóa container ngay sau khi phân tích xong để tránh rác ổ cứng.
+* `--network=host`: Dùng chung stack mạng của máy host để kết nối thẳng tới server SonarQube mà không bị rào cản mạng nội bộ/VPN.
+* `-e SONAR_HOST_URL`: Truyền địa chỉ máy chủ SonarQube (đọc từ biến hoặc mặc định trong Makefile).
+* `-e SONAR_TOKEN`: Token xác thực quyền phân tích mã nguồn.
+* `-v "$$(pwd):/usr/src"`: Mount toàn bộ thư mục mã nguồn hiện tại vào thư mục làm việc `/usr/src` bên trong container.
+* `sonarsource/sonar-scanner-cli`: Image chính thức do SonarSource cung cấp, có sẵn SonarScanner CLI và Java runtime chuẩn, bảo đảm kết quả phân tích đồng nhất trên mọi hệ điều hành (macOS, Linux, Windows).
 
-Trong trường hợp cần lưu tạm code đang làm dở (WIP - Work in Progress) trước khi đổi máy/chuyển branch, hoặc commit khẩn cấp mà không muốn chạy kiểm tra:
-
-```bash
-# Cách 1: Dùng cờ đầy đủ
-git commit -m "WIP: lưu tạm code đang làm dở" --no-verify
-
-# Cách 2: Dùng cờ viết tắt (-n)
-git commit -n -m "WIP: lưu tạm code đang làm dở"
-
-# Áp dụng tương tự khi cần push gấp (bỏ qua pre-push hook):
-git push origin feature-branch --no-verify
-```
-
-> [!NOTE]
->
-> - Cờ `--no-verify` (hoặc `-n`) sẽ vượt qua toàn bộ Git Hooks trên máy cá nhân của bạn để tạo commit ngay tức thì.
-> - **Lưu ý**: Cờ này chỉ có tác dụng cục bộ. Khi bạn đẩy code lên và mở **Pull Request**, hệ thống **CI/CD Quality Gate trên Server** vẫn sẽ tự động quét để đảm bảo nhánh chính không bị lỗi.
-
----
-
-### 2. Quét SonarQube trước khi Push Code / Mở Pull Request
-
-Dự án đã tích hợp sẵn lệnh quét SonarQube đóng gói qua **Docker** trong [Makefile](file:///home/ubuntu/learn/multi-tenant/be-nestjs-multi-tenant/Makefile).
-
-#### Bước 1: Chạy kiểm thử xuất báo cáo độ bao phủ mã nguồn (Coverage)
+#### Các bước thực thi hàng ngày:
 
 ```bash
+# Bước 1: Chạy kiểm thử xuất báo cáo độ bao phủ mã nguồn (Coverage)
 make test-cov
-```
 
-Lệnh này sẽ sinh file `coverage/lcov.info` để SonarQube phân tích tỷ lệ test coverage.
-
-#### Bước 2: Thực thi quét SonarQube
-
-```bash
-make sonar SONAR_TOKEN=sqp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Bước 2: Thực thi quét SonarQube
+make sonar SONAR_TOKEN=sqa_c741xxxxxxxxxxxxxxxxxxxx
 ```
 
 > [!TIP]
 > **Cách lưu Token để không phải gõ lại mỗi lần:**
 > Thêm vào file `~/.bashrc` hoặc `~/.zshrc` trên máy của bạn:
->
 > ```bash
-> export SONAR_TOKEN="sqp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+> export SONAR_TOKEN="sqa_c741xxxxxxxxxxxxxxxxxxxx"
 > ```
->
-> Sau đó mỗi lần cần quét, bạn chỉ việc gõ:
->
+> Sau đó, mỗi khi cần kiểm tra bạn chỉ việc gõ ngắn gọn:
 > ```bash
 > make sonar
 > ```
 
 ---
 
-## 💻 IV. Cài Đặt SonarLint Trên IDE (Khuyến Nghị Cho Mọi Thành Viên)
+## 🔄 V. TẦNG 4: CI/CD Pipeline (Chốt Chặn Merge Tuyệt Đối trên Server)
 
-Extension **SonarLint** giúp phát hiện lỗi bảo mật và code smells tức thì ngay khi bạn đang code.
+> **Mục tiêu**: Chốt chặn tối cao tự động chạy trên máy chủ CI/CD khi tạo Merge Request (MR). Khóa hoàn toàn nút Merge nếu vi phạm Quality Gate.
 
-### Hướng dẫn cài đặt trên VSCode:
-
-1. Vào mục Extensions (Ctrl+Shift+X) tìm và cài đặt **SonarLint** (`SonarSource.sonarlint-vscode`).
-2. Mở file cấu hình `.vscode/settings.json` trong dự án và cấu hình kết nối tới server nội bộ:
-
-```json
-{
-  "sonarlint.connectedMode.connections.sonarqube": [
-    {
-      "connectionId": "internal-sonar",
-      "serverUrl": "http://57.180.31.107:9000",
-      "token": "sqp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-    }
-  ],
-  "sonarlint.connectedMode.project": {
-    "connectionId": "internal-sonar",
-    "projectKey": "be-nestjs-multi-tenant"
-  }
-}
-```
-
----
-
-## 🔄 V. Tích Hợp Tự Động Hóa CI/CD (Pipeline Automation)
-
-Hệ thống CI/CD đảm nhiệm vai trò chốt chặn cuối cùng (Quality Gate) trước khi mã nguồn được phép gộp vào nhánh chính.
-
-### 1. Mẫu cấu hình cho GitLab CI (`.gitlab-ci.yml`)
+### 1. Cấu hình Pipeline cho GitLab CI ([.gitlab-ci.yml](file:///be-nestjs-multi-tenant/.gitlab-ci.yml)):
 
 ```yaml
 stages:
   - test
   - sonarqube
 
-unit_test_coverage:
+variables:
+  SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+  GIT_DEPTH: "0"
+
+# ------------------------------------------------------------------------------
+# Stage 1: Chạy Unit Tests và xuất báo cáo Code Coverage (lcov.info)
+# ------------------------------------------------------------------------------
+unit_tests_coverage:
   stage: test
   image: node:24-alpine
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .pnpm-store
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@latest --activate
+    - pnpm config set store-dir .pnpm-store
   script:
-    - corepack enable && corepack prepare pnpm@12.16.1 --activate
     - pnpm install --frozen-lockfile
     - pnpm run test:cov
   artifacts:
+    expire_in: 1 day
     paths:
       - coverage/
-    expire_in: 1 day
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == 'master'
+    - if: $CI_COMMIT_BRANCH == 'develop'
 
-sonarqube_check:
+# ------------------------------------------------------------------------------
+# Stage 2: SonarQube Quality Gate chốt chặn (Bắt buộc PASSED mới cho Merge)
+# ------------------------------------------------------------------------------
+sonarqube_quality_gate:
   stage: sonarqube
   image:
     name: sonarsource/sonar-scanner-cli:latest
-    entrypoint: ['']
-  variables:
-    SONAR_USER_HOME: '${CI_PROJECT_DIR}/.sonar'
-    GIT_DEPTH: '0'
+    entrypoint: [""]
   cache:
-    key: '${CI_JOB_NAME}'
+    key: "${CI_JOB_NAME}"
     paths:
       - .sonar/cache
-  script:
-    - sonar-scanner -Dsonar.token="${SONAR_TOKEN}"
   dependencies:
-    - unit_test_coverage
-  only:
-    - merge_requests
-    - develop
-    - master
+    - unit_tests_coverage
+  script:
+    - sonar-scanner \
+        -Dsonar.host.url="http://57.xxx.xx.xx" \
+        -Dsonar.token="${SONAR_TOKEN}" \
+        -Dsonar.projectKey="NestJS-HeadlessCMS-Rule" \
+        -Dsonar.qualitygate.wait=true \
+        -Dsonar.qualitygate.timeout=300
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == 'master'
+    - if: $CI_COMMIT_BRANCH == 'develop'
+  allow_failure: false
 ```
 
-### 2. Mẫu cấu hình cho GitHub Actions (`.github/workflows/sonar.yml`)
-
-```yaml
-name: SonarQube Quality Gate
-
-on:
-  push:
-    branches: [master, develop]
-  pull_request:
-    branches: [master, develop]
-
-jobs:
-  sonar:
-    name: Test & SonarQube Scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup pnpm & Node.js
-        uses: pnpm/action-setup@v3
-        with:
-          version: 12.16.1
-
-      - name: Install dependencies & Run Tests
-        run: |
-          pnpm install
-          pnpm run test:cov
-
-      - name: SonarQube Scanner
-        uses: SonarSource/sonarqube-scan-action@v3
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: 'http://57.180.31.107:9000'
-```
+### 2. Kích hoạt khóa nút Merge trên giao diện GitLab:
+1. **Lưu Token bí mật**: Vào GitLab $\rightarrow$ **Settings** $\rightarrow$ **CI/CD** $\rightarrow$ **Variables** $\rightarrow$ Thêm biến `SONAR_TOKEN` (chọn kiểu *Masked*).
+2. **Khóa Merge khi Pipeline trượt**: Vào **Settings** $\rightarrow$ **Merge Requests** $\rightarrow$ Tích chọn ✅ **Pipelines must succeed**.
 
 ---
 
 ## 🎯 VI. Tiêu Chuẩn Nghiệm Thu Chất Lượng (Quality Gate Policy)
 
-Mọi Pull Request / Merge Request vào nhánh `develop` hoặc `master` bắt buộc phải vượt qua các tiêu chí sau:
+Mọi Pull Request / Merge Request vào nhánh `develop` hoặc `master` bắt buộc phải vượt qua các tiêu chí sau trên SonarQube:
 
-| Tiêu chí                              | Ngưỡng bắt buộc (Threshold)           | Mức độ nghiêm trọng | Hành động                  |
-| :------------------------------------ | :------------------------------------ | :------------------ | :------------------------- |
-| **Bugs (Lỗi logic)**                  | **0 Blocker, 0 Critical**             | Cao nhất            | Chặn Merge                 |
-| **Vulnerabilities (Lỗ hổng bảo mật)** | **0 vấn đề**                          | Cao nhất            | Chặn Merge                 |
-| **Security Hotspots**                 | **100% được review & xác nhận**       | Nghiêm ngặt         | Bắt buộc Security Review   |
-| **Code Smells**                       | **Đạt xếp hạng A** (Nợ kỹ thuật < 5%) | Trung bình          | Yêu cầu refactor           |
-| **Test Coverage trên Code Mới**       | **>= 80.0%**                          | Cao                 | Viết bổ sung Unit Test     |
-| **Trùng lặp code (Duplications)**     | **< 3.0%**                            | Trung bình          | Tách hàm/module dùng chung |
+| Tiêu chí | Ngưỡng bắt buộc (Threshold) | Mức độ nghiêm trọng | Hành động khi vi phạm |
+| :--- | :--- | :--- | :--- |
+| **Bugs (Lỗi logic)** | **0 Blocker, 0 Critical** | Cao nhất | **Chặn Merge** |
+| **Vulnerabilities (Lỗ hổng bảo mật)** | **0 vấn đề** | Cao nhất | **Chặn Merge** |
+| **Security Hotspots** | **100% được review & xác nhận** | Nghiêm ngặt | Bắt buộc Security Review |
+| **Code Smells** | **Đạt xếp hạng A** (Nợ kỹ thuật < 5%) | Trung bình | Yêu cầu refactor |
+| **Test Coverage trên Code Mới** | **>= 80.0%** | Cao | Bổ sung Unit Test |
+| **Trùng lặp code (Duplications)** | **< 3.0%** | Trung bình | Tách hàm/module dùng chung |
 
 ---
 
 ## ❓ VII. Xử Lý Sự Cố Thường Gặp (Troubleshooting)
 
 ### 1. Lỗi: `You're not authorized to analyze this project`
-
-- **Nguyên nhân**: Token `SONAR_TOKEN` bị sai, hết hạn hoặc tài khoản chưa được phân quyền `Execute Analysis` trên Project Key `be-nestjs-multi-tenant`.
-- **Khắc phục**:
-  1. Đăng nhập vào SonarQube: `http://57.180.31.107:9000`
-  2. Vào góc trên bên phải -> `My Account` -> Tab `Security` -> Tạo một `User Token` mới.
-  3. Liên hệ Quản trị viên (DevOps) nếu tài khoản của bạn chưa được cấp quyền truy cập project.
+- **Nguyên nhân**: Token `SONAR_TOKEN` bị sai, hết hạn hoặc tài khoản chưa có quyền `Execute Analysis` trên Project Key `NestJS-HeadlessCMS-Rule`.
+- **Khắc phục**: Đăng nhập `http://57.xxx.xx.xx` $\rightarrow$ `My Account` $\rightarrow$ `Security` $\rightarrow$ Tạo User Token mới.
 
 ### 2. Lỗi: `Cannot find coverage report / lcov.info`
-
-- **Nguyên nhân**: File báo cáo kiểm thử chưa được tạo trước khi quét.
-- **Khắc phục**: Luôn chạy `make test-cov` trước khi chạy `make sonar`.
+- **Nguyên nhân**: File báo cáo kiểm thử chưa được sinh ra trước khi chạy scanner.
+- **Khắc phục**: Luôn chạy `make test-cov` (hoặc `pnpm run test:cov`) trước khi chạy `make sonar`.
 
 ### 3. Lỗi: `Connection timed out` hoặc không kết nối được Sonar Server
-
 - **Nguyên nhân**: Máy tính chưa kết nối mạng nội bộ hoặc VPN của công ty.
-- **Khắc phục**: Bật VPN công ty và kiểm tra ping tới server: `ping 57.180.31.107`.
+- **Khắc phục**: Kiểm tra kết nối mạng tới server: `curl -I http://57.xxx.xx.xx`.
 
 ### 4. Quy trình xử lý khẩn cấp (Hotfix Bypass Protocol)
-
-- Trong các trường hợp sự cố Production nghiêm trọng (P0 Incident) cần deploy bản vá gấp mà server SonarQube đang gặp sự cố:
-  - Lập trình viên phải ghi chú rõ ràng mã Ticket Hotfix trong nội dung PR.
-  - Cần có sự phê duyệt trực tiếp (Approved) từ **Tech Lead / Security Officer** để tạm thời bỏ qua Quality Gate.
+- Trong trường hợp khẩn cấp (P0 Incident) cần deploy bản vá gấp mà server SonarQube gặp sự cố:
+  - Lập trình viên phải ghi rõ mã Ticket Hotfix trong nội dung Commit/MR.
+  - Cần có sự phê duyệt trực tiếp (Approved) từ **Tech Lead / Security Officer** để tạm thời mở khóa Merge.
